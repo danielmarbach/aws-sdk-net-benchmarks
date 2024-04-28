@@ -6,7 +6,7 @@ using BenchmarkDotNet.Attributes;
 
 namespace aws_sdk_net_benchmarks;
 
-[ShortRunJob]
+[SimpleJob]
 [MemoryDiagnoser]
 public class UrlEncode
 {
@@ -74,12 +74,13 @@ public class UrlEncode
     [SkipLocalsInit]
     public static string After(int rfcNumber, string data, bool path)
     {
-        byte[] sharedDataBuffer = null, sharedEncodedBuffer = null;
+        byte[] sharedDataBuffer = null;
         // Put this elsewhere?
         const int MaxStackLimit = 256;
         try
         {
-            if (!TryGetRFCEncodingSchemes(rfcNumber, out var validUrlCharacters))
+            string validUrlCharacters;
+            if (!TryGetRFCEncodingSchemes(rfcNumber, out validUrlCharacters))
                 validUrlCharacters = ValidUrlCharacters;
 
             var unreservedChars = string.Concat(validUrlCharacters, path ? ValidPathCharacters : "");
@@ -88,40 +89,36 @@ public class UrlEncode
             var encoding = Encoding.UTF8;
 
             var dataByteLength = encoding.GetMaxByteCount(dataAsSpan.Length);
-            var dataBuffer = dataByteLength <= MaxStackLimit
+            var encodedByteLength = 2 * dataByteLength;
+            var dataBuffer = encodedByteLength <= MaxStackLimit
                 ? stackalloc byte[MaxStackLimit]
                 : sharedDataBuffer = ArrayPool<byte>.Shared.Rent(dataByteLength);
-            var bytesWritten = encoding.GetBytes(dataAsSpan, dataBuffer);
-
-            var encodedByteLength = 2 * dataByteLength;
-            var encodedBuffer = encodedByteLength <= MaxStackLimit
-                ? stackalloc byte[MaxStackLimit]
-                : sharedEncodedBuffer = ArrayPool<byte>.Shared.Rent(encodedByteLength);
+            var encodingBuffer = dataBuffer.Slice(dataBuffer.Length - dataByteLength);
+            var bytesWritten = encoding.GetBytes(dataAsSpan, encodingBuffer);
+            
             var index = 0;
-            foreach (var symbol in dataBuffer.Slice(0, bytesWritten))
+            foreach (var symbol in encodingBuffer.Slice(0, bytesWritten))
                 if (unreservedChars.IndexOf((char)symbol) != -1)
                 {
-                    encodedBuffer[index++] = symbol;
+                    dataBuffer[index++] = symbol;
                 }
                 else
                 {
-                    encodedBuffer[index++] = (byte)'%';
+                    dataBuffer[index++] = (byte)'%';
 
                     // Break apart the byte into two four-bit components and
                     // then convert each into their hexadecimal equivalent.
                     var hiNibble = symbol >> 4;
                     var loNibble = symbol & 0xF;
-                    encodedBuffer[index++] = (byte)ToUpperHex(hiNibble);
-                    encodedBuffer[index++] = (byte)ToUpperHex(loNibble);
+                    dataBuffer[index++] = (byte)ToUpperHex(hiNibble);
+                    dataBuffer[index++] = (byte)ToUpperHex(loNibble);
                 }
 
-            return encoding.GetString(encodedBuffer.Slice(0, index));
+            return encoding.GetString(dataBuffer.Slice(0, index));
         }
         finally
         {
             if (sharedDataBuffer != null) ArrayPool<byte>.Shared.Return(sharedDataBuffer);
-
-            if (sharedEncodedBuffer != null) ArrayPool<byte>.Shared.Return(sharedEncodedBuffer);
         }
     }
 
