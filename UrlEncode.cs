@@ -92,7 +92,7 @@ public class UrlEncode
             var encodedByteLength = 2 * dataByteLength;
             var dataBuffer = encodedByteLength <= MaxStackLimit
                 ? stackalloc byte[MaxStackLimit]
-                : sharedDataBuffer = ArrayPool<byte>.Shared.Rent(dataByteLength);
+                : sharedDataBuffer = ArrayPool<byte>.Shared.Rent(encodedByteLength);
             var encodingBuffer = dataBuffer.Slice(dataBuffer.Length - dataByteLength);
             var bytesWritten = encoding.GetBytes(dataAsSpan, encodingBuffer);
             
